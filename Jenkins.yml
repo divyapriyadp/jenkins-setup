@@ -1,46 +1,34 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: This template create an Application Load Balancer with EC2 InfraStructure
+Description: This template is to create an EC2 instance,IAM roles with SSM Policy,Security group and deploy jenkins in it
 Parameters:
   InstanceType:
     Description: WebServer EC2 instance type
     Type: String
-    Default: t2.medium
+    Default: t2.micro
   AmazonImageID:
     Description: The ID of the Amazon machine image (AMI)
     Type: String
-    Default: 'ami-0ad704c126371a549'
+    Default: 'ami-04db49c0fb2215364'
   JenkinsAutomationRole:
-    Description: The JenkinsAutomationRole of an instance
+    Description: The ID of the Amazon machine image (AMI)
     Type: String
-    Default: jenkinsautomationrole
-  JenkinsAutomationProfile:
-    Description: The JenkinsAutomationProfile for JenkinsAutomationRole of an instance
-    Type: String
-    Default: JenkinsAutomationProfile
-  IAMManagedPolicy:
-    Description: ManagedPolicy for JenkinsAutomationRole of an instance
-    Type: String
-    Default: PutS3ObjectPolicy
-  BucketPrefix:
-    Description: The BucketPrefix of an instance
-    Type: String
-    Default: cfm-s3
+    Default: jenkinsservicerole
 
 Resources:
-
   EC2Instance:
     DependsOn: InstanceSecurityGroup
     Type: AWS::EC2::Instance
     Properties:
       InstanceType: !Ref InstanceType
-      ImageId: !Ref AmazonImageID 
+      ImageId: !Ref AmazonImageID
       IamInstanceProfile: !Ref ManagedInstanceProfile
-      SecurityGroups: [!Ref 'InstanceSecurityGroup']
       Monitoring: true
+      SecurityGroups: 
+        - !Ref InstanceSecurityGroup
       BlockDeviceMappings:
         - DeviceName: /dev/sdc
           Ebs:
-            SnapshotId: snap-041de31327a858319
+            SnapshotId: snap-0bdcc50b291983cea
             VolumeSize: 8
             VolumeType: io1
             Iops: 400
@@ -52,42 +40,33 @@ Resources:
             sudo su
             yum update -y
             yum install -y httpd
-            echo "Healthy" > /var/www/html/index.html
-            service httpd start
-            yum install java-1.8.0 -y
-            yum install java-1.8.0-openjdk -y
-            yum install git -y
-            yum install maven -y
-            yum install docker -y
-            systemctl start docker
-            chmod 777 /var/run/docker.sock
+            yum install java -y
             wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/redhat/jenkins.repo
             rpm --import https://pkg.jenkins.io/redhat/jenkins.io.key
             yum install jenkins -y
             service jenkins start 
-            cat /var/lib/jenkins/secrets/initialAdminPassword
             echo "Initial Admin Password: $(cat /var/lib/jenkins/secrets/initialAdminPassword)" > /var/www/html/index.html
-
+            service httpd start
+      Tags:
+        - Key: team
+          Value: dp
+      
   InstanceSecurityGroup:
-    DependsOn: ManagedInstanceProfile
+    DependsOn: Role
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Enable SSH access via port 
       SecurityGroupIngress:
-      - IpProtocol: tcp
-        FromPort: 8080
-        ToPort: 8080
-        CidrIp: 0.0.0.0/0
-      - IpProtocol: tcp
-        FromPort: 80
-        ToPort: 80
-        CidrIp: 0.0.0.0/0  
-      - IpProtocol: tcp
-        FromPort: 8090
-        ToPort: 8090
-        CidrIp: 0.0.0.0/0  
-
-  EC2SSMRole:
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          
+  Role:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
@@ -101,49 +80,16 @@ Resources:
           Action: sts:AssumeRole
       ManagedPolicyArns:
       - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
-      - arn:aws:iam::aws:policy/AWSCloudFormationFullAccess
-      - arn:aws:iam::aws:policy/AmazonS3FullAccess
-      - arn:aws:iam::aws:policy/EC2InstanceProfileForImageBuilderECRContainerBuilds
-      - arn:aws:iam::aws:policy/AmazonECS_FullAccess
       Path: "/"
       RoleName: !Ref JenkinsAutomationRole
-
+      
   ManagedInstanceProfile:
-    DependsOn: EC2SSMRole
+    DependsOn: Role
     Type: AWS::IAM::InstanceProfile
     Properties:
       Path: "/"
       Roles:
-      - !Ref EC2SSMRole
-      InstanceProfileName: !Ref JenkinsAutomationProfile   
-  
-  S3ManagedPolicy:
-    DependsOn: EC2SSMRole
-    Type: AWS::IAM::ManagedPolicy
-    Properties:
-        Description: Policy for putting S3 Objects
-        ManagedPolicyName: !Ref IAMManagedPolicy
-        PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-            - Sid: "S3Policy"
-              Effect: Allow
-              Action:
-              - s3:PutObject
-              Resource: 
-              - !Sub 'arn:aws:s3:::${BucketPrefix}*'
-            - Sid: "ECRRepo"
-              Effect: Allow
-              Action:
-              - ecr:CreateRepository
-              - iam:GetRole
-              - iam:CreateRole
-              - ecs:DescribeClusters
-              - iam:CreateRole
-              - iam:AttachRolePolicy
-              - logs:CreateLogGroup
-              Resource: 
-              - *
-
-        Roles:
-           - !Ref JenkinsAutomationRole
+      - !Ref Role
+      InstanceProfileName: !Ref JenkinsAutomationRole
+          
+      
